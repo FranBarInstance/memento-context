@@ -32,14 +32,32 @@ The interaction with Memento Context follows a simple, automated lifecycle:
 
 ## Installation
 
-You can install `memento-context` seamlessly from this repository code using `pip` or preferably `pipx` (to keep dependencies strictly isolated while exposing the executable globally).
+> [!NOTE]
+> `memento-context` is currently in early development. Standard installation via PyPI (`pip install memento-context`) will be available starting with the first stable release.
+
+### Quick Install (Recommended)
+
+You can install the server in a single command using our setup scripts. This clones the repository into a local hidden folder and installs the executable globally.
+
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/FranBarInstance/memento-context/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/FranBarInstance/memento-context/main/scripts/install.ps1" -OutFile install.ps1; .\install.ps1
+```
+
+### Manual Install from Source
+
+If you prefer to install manually from the source code:
 
 ```bash
-# Recommended approach for CLI tools
-pipx install .
-
-# Or using standard pip
-pip install .
+git clone https://github.com/FranBarInstance/memento-context.git
+cd memento-context
+pipx install .  # Recommended approach
+# or: pip install .
 ```
 
 For developmental purposes, use the editable mode:
