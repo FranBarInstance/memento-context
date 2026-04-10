@@ -79,4 +79,5 @@ All AI memories are saved inside the user home directory (`~/.memento-context/`)
 ## License
 
 This project is licensed under the MIT License.
+
 See: https://github.com/FranBarInstance/memento-context
