@@ -31,6 +31,7 @@ class MementoServer:
 
     def __init__(self) -> None:
         self.mementos_loaded = False
+        self.active_repo_path: Optional[str] = None
         self.handlers = {
             "init_memento": self.handle_init_memento,
             "get_mementos": self.handle_get_mementos,
@@ -56,6 +57,8 @@ class MementoServer:
 
     def current_repo_path(self) -> str:
         """Return the canonical workspace path used as repository scope."""
+        if self.active_repo_path:
+            return str(Path(self.active_repo_path).resolve())
         return str(Path.cwd().resolve())
 
     def repo_key(self, repo_path: str) -> str:
@@ -70,7 +73,7 @@ class MementoServer:
 
     def repo_dir(self, repo_path: Optional[str] = None) -> Path:
         """Return the storage directory for the current or provided repository."""
-        resolved_path = repo_path or self.current_repo_path()
+        resolved_path = str(Path(repo_path or self.current_repo_path()).resolve())
         return REPOS_DIR / self.repo_key(resolved_path)
 
     def repo_mementos_file(self, repo_path: Optional[str] = None) -> Path:
@@ -299,8 +302,12 @@ class MementoServer:
             self.save_repo_mementos(filtered, repo_path)
         return scope, target
 
-    def handle_init_memento(self, _: Dict[str, Any]) -> str:
+    def handle_init_memento(self, args: Dict[str, Any]) -> str:
         """Handler for init_memento tool: returns behavior plus active mementos."""
+        repo_path = args.get("repo_path")
+        if repo_path:
+            self.active_repo_path = repo_path
+
         behavior = self.load_behavior().strip()
         active_context = self.format_active_context()
         self.mark_context_loaded("init_memento")

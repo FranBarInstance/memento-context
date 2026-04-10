@@ -4,7 +4,12 @@
     "description": "MANDATORY: Call this tool at the beginning of every session before responding to the user. Loads behavior instructions plus active global and repository mementos into context.",
     "inputSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "Optional: Absolute path to the current repository/workspace. If provided, scoped memory will be tied to this path instead of the server's working directory."
+        }
+      },
       "required": []
     }
   },

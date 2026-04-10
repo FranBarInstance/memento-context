@@ -7,7 +7,7 @@ See licence: https://github.com/FranBarInstance/memento-context
 
 import json
 import pytest
-from memento_context.server import MementoServer
+from memento_context.server import MementoServer, REPOS_DIR
 
 
 @pytest.fixture
@@ -29,9 +29,8 @@ def mock_server(monkeypatch, tmp_path):
     (tmp_path / "tools.json").write_text(json.dumps([{"name": "test_tool"}]))
     (tmp_path / "behavior.md").write_text("Test behavior instructions")
 
-    # Mock current_repo_path to be stable
-    mock_repo = str(tmp_path / "mock-repo")
-    monkeypatch.setattr(server, "current_repo_path", lambda: mock_repo)
+    # Set default active_repo_path to be stable
+    server.active_repo_path = str(tmp_path / "mock-repo")
 
     return server
 
@@ -51,6 +50,19 @@ def test_init_memento_flow(mock_server):
     assert "Test behavior instructions" in response
     assert "Global Mementos" in response
     assert mock_server.mementos_loaded is True
+
+
+def test_init_memento_with_custom_path(mock_server, tmp_path):
+    """Ensure providing an explicit path in init_memento overrides default scoping."""
+    custom_path = str(tmp_path / "custom-repo")
+    mock_server.handle_init_memento({"repo_path": custom_path})
+    
+    # When we save a repo memento now, it should use custom_path
+    mock_server.handle_save_memento({"text": "custom", "scope": "repo"})
+    
+    # Verify the file was created in the custom repo directory
+    expected_file = mock_server.repo_mementos_file(custom_path)
+    assert expected_file.exists()
 
 
 def test_mutation_restriction(mock_server):
