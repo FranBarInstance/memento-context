@@ -160,3 +160,72 @@ def test_load_json_flat_array_migration(mock_server, tmp_path):
     assert "updated_at" in raw
     assert isinstance(raw["mementos"], list)
     assert raw["mementos"][0]["id"] == "old_1"
+
+
+def test_save_conversation_creates_attachment_files(mock_server):
+    """Saving a conversation should create a memento plus attachment files."""
+    mock_server.mementos_loaded = True
+
+    response = mock_server.handle_save_conversation(
+        {
+            "scope": "repo",
+            "text": "[Conversación guardada] Sesión sobre adjuntos.",
+            "tags": ["conversacion", "adjuntos"],
+            "conversation": "# Chat\ncontenido",
+            "summary": "Resumen corto",
+        }
+    )
+
+    assert "Conversation saved" in response
+    mementos = mock_server.load_repo_mementos()
+    assert len(mementos) == 1
+    memento = mementos[0]
+    assert memento["attachments"].endswith("_attachments")
+
+    attachments_dir = mock_server.get_attachments_dir(memento)
+    assert (attachments_dir / "conversation.md").read_text() == "# Chat\ncontenido"
+    assert (attachments_dir / "summary.md").read_text() == "Resumen corto"
+
+
+def test_save_memento_attachments_adds_files_to_existing_memento(mock_server, tmp_path):
+    """A file can be copied into the attachments directory of an existing memento."""
+    mock_server.mementos_loaded = True
+    mock_server.handle_save_memento({"text": "plain memento", "scope": "repo"})
+    memento = mock_server.load_repo_mementos()[0]
+
+    source_file = tmp_path / "plan.md"
+    source_file.write_text("plan content")
+
+    response = mock_server.handle_save_memento_attachments(
+        {
+            "id": memento["id"],
+            "paths": [str(source_file)],
+        }
+    )
+
+    assert f"Attachments added to {memento['id']}:" in response
+    assert "plan.md" in response
+
+    updated_memento = mock_server.load_repo_mementos()[0]
+    attachments_dir = mock_server.get_attachments_dir(updated_memento)
+    assert updated_memento["attachments"].endswith("_attachments")
+    assert (attachments_dir / "plan.md").read_text() == "plan content"
+
+
+def test_get_memento_attachments_returns_markdown(mock_server):
+    """Attachment contents should be returned as a markdown-formatted document."""
+    mock_server.mementos_loaded = True
+    mock_server.handle_save_conversation(
+        {
+            "scope": "global",
+            "text": "[Conversación guardada] Memoria global.",
+            "conversation": "Conversación completa",
+        }
+    )
+    memento = mock_server.load_global_mementos()[0]
+
+    response = mock_server.handle_get_memento_attachments({"id": memento["id"]})
+
+    assert f"## Attachments for {memento['id']}" in response
+    assert "### conversation.md" in response
+    assert "Conversación completa" in response

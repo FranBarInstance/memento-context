@@ -8,6 +8,7 @@ See licence: https://github.com/FranBarInstance/memento-context
 import datetime
 import hashlib
 import json
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -36,6 +37,9 @@ class MementoServer:
             "init_memento": self.handle_init_memento,
             "get_mementos": self.handle_get_mementos,
             "save_memento": self.handle_save_memento,
+            "save_conversation": self.handle_save_conversation,
+            "save_memento_attachments": self.handle_save_memento_attachments,
+            "get_memento_attachments": self.handle_get_memento_attachments,
             "delete_memento": self.handle_delete_memento,
             "move_memento": self.handle_move_memento,
         }
@@ -260,6 +264,40 @@ class MementoServer:
             ) from error
         return expires
 
+    def attachments_dir_name(self, memento_id: str) -> str:
+        """Return the standard folder name used for a memento attachments directory."""
+        return f"{memento_id}_attachments"
+
+    def get_attachments_dir(self, memento: Dict[str, Any], create: bool = False) -> Path:
+        """Resolve the attachment directory for a stored memento."""
+        scope = self.validate_scope(memento["scope"])
+        dir_name = memento.get("attachments") or self.attachments_dir_name(memento["id"])
+        if scope == "global":
+            attachments_dir = GLOBAL_MEMENTOS_FILE.parent / dir_name
+        else:
+            repo_path = memento.get("repo_path") or self.current_repo_path()
+            attachments_dir = self.repo_mementos_file(repo_path).parent / dir_name
+        if create:
+            attachments_dir.mkdir(parents=True, exist_ok=True)
+        return attachments_dir
+
+    def write_attachments(
+        self,
+        attachments_dir: Path,
+        conversation: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> List[str]:
+        """Write standard conversation attachments and return created filenames."""
+        attachments_dir.mkdir(parents=True, exist_ok=True)
+        created: List[str] = []
+        if conversation is not None:
+            (attachments_dir / "conversation.md").write_text(conversation)
+            created.append("conversation.md")
+        if summary is not None:
+            (attachments_dir / "summary.md").write_text(summary)
+            created.append("summary.md")
+        return created
+
     def build_memento(self, args: Dict[str, Any], scope: str) -> Dict[str, Any]:
         """Build a stored memento payload."""
         memento = {
@@ -274,6 +312,8 @@ class MementoServer:
             repo_path = self.current_repo_path()
             memento["repo_path"] = repo_path
             memento["repo_name"] = Path(repo_path).name
+        if args.get("conversation") is not None or args.get("summary") is not None:
+            memento["attachments"] = self.attachments_dir_name(memento["id"])
         return memento
 
     def persist_memento(self, memento: Dict[str, Any]) -> None:
@@ -288,6 +328,18 @@ class MementoServer:
         repo_path = str(memento["repo_path"])
         mementos = self.load_repo_mementos(repo_path)
         mementos.append(memento)
+        self.save_repo_mementos(mementos, repo_path)
+
+    def persist_updated_mementos(
+        self,
+        scope: str,
+        mementos: List[Dict[str, Any]],
+        repo_path: Optional[str] = None,
+    ) -> None:
+        """Persist a full memento collection for the provided scope."""
+        if scope == "global":
+            self.save_global_mementos(mementos)
+            return
         self.save_repo_mementos(mementos, repo_path)
 
     def remove_memento(self, memento_id: str) -> Tuple[str, Dict[str, Any]]:
@@ -352,6 +404,87 @@ class MementoServer:
         memento = self.build_memento(args, scope)
         self.persist_memento(memento)
         return f"Memento saved: {memento['id']} ({scope})"
+
+    def handle_save_conversation(self, args: Dict[str, Any]) -> str:
+        """Handler for save_conversation tool: stores a memento with attachments."""
+        self.require_mementos_loaded()
+        scope = self.validate_scope(args.get("scope"))
+        conversation = args.get("conversation")
+        summary = args.get("summary")
+        if conversation is None and summary is None:
+            raise ValueError(
+                "save_conversation requires at least one of 'conversation' or 'summary'"
+            )
+        if conversation is not None and not isinstance(conversation, str):
+            raise ValueError("conversation must be a string")
+        if summary is not None and not isinstance(summary, str):
+            raise ValueError("summary must be a string")
+
+        memento = self.build_memento(args, scope)
+        attachments_dir = self.get_attachments_dir(memento, create=True)
+        created = self.write_attachments(
+            attachments_dir,
+            conversation=conversation,
+            summary=summary,
+        )
+        self.persist_memento(memento)
+        return (
+            f"Conversation saved: {memento['id']} ({scope})"
+            f" — {len(created)} attachment(s) in {attachments_dir.name}/"
+        )
+
+    def handle_save_memento_attachments(self, args: Dict[str, Any]) -> str:
+        """Handler for save_memento_attachments tool: copies files into a memento."""
+        self.require_mementos_loaded()
+        paths = args.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise ValueError("paths must be a non-empty array of absolute file paths")
+
+        scope, mementos, memento = self.find_memento(args["id"])
+        if "attachments" not in memento:
+            memento["attachments"] = self.attachments_dir_name(memento["id"])
+            repo_path = memento.get("repo_path") if scope == "repo" else None
+            self.persist_updated_mementos(scope, mementos, repo_path)
+
+        attachments_dir = self.get_attachments_dir(memento, create=True)
+        results = [f"Attachments added to {memento['id']}:"]
+        for raw_path in paths:
+            if not isinstance(raw_path, str):
+                raise ValueError("each path must be a string")
+            source = Path(raw_path)
+            if not source.is_absolute():
+                raise ValueError(f"path must be absolute: {raw_path}")
+            if not source.exists() or not source.is_file():
+                results.append(f"  ✗ {source.name} — file not found")
+                continue
+            destination = attachments_dir / source.name
+            shutil.copy2(source, destination)
+            results.append(f"  ✓ {source.name} (copied from {source})")
+        return "\n".join(results)
+
+    def handle_get_memento_attachments(self, args: Dict[str, Any]) -> str:
+        """Handler for get_memento_attachments tool: returns attachment contents."""
+        self.require_mementos_loaded()
+        _, _, memento = self.find_memento(args["id"])
+        if "attachments" not in memento:
+            raise ValueError(f"Memento has no attachments: {args['id']}")
+
+        attachments_dir = self.get_attachments_dir(memento)
+        if not attachments_dir.exists() or not attachments_dir.is_dir():
+            raise ValueError(f"Attachments directory not found for memento: {args['id']}")
+
+        files = sorted(path for path in attachments_dir.iterdir() if path.is_file())
+        if not files:
+            raise ValueError(f"No attachments found for memento: {args['id']}")
+
+        sections = [
+            f"## Attachments for {memento['id']}",
+            f"(folder: {attachments_dir.name}/)",
+        ]
+        for file_path in files:
+            sections.append(f"\n### {file_path.name}")
+            sections.append(file_path.read_text())
+        return "\n".join(sections)
 
     def handle_delete_memento(self, args: Dict[str, Any]) -> str:
         """Handler for delete_memento tool: removes a memento by given id."""

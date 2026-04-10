@@ -42,6 +42,45 @@
     }
   },
   {
+    "name": "save_conversation",
+    "description": "Saves a conversation or summary as a memento with attachments. Only use this on explicit user request. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Short memento text to inject in future sessions. It should mention that attachments exist." },
+        "scope": { "type": "string", "description": "Storage scope: global or repo." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "2-4 keywords for contextual filtering." },
+        "expires": { "type": "string", "description": "Expiration date (YYYY-MM-DD) or 'never'. Defaults to 'never'." },
+        "conversation": { "type": "string", "description": "Full conversation content to store in conversation.md." },
+        "summary": { "type": "string", "description": "Narrative summary to store in summary.md." }
+      },
+      "required": ["text", "scope"]
+    }
+  },
+  {
+    "name": "save_memento_attachments",
+    "description": "Copies files from the filesystem into the attachments directory of an existing memento. Only use this on explicit user request. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exact memento ID to update." },
+        "paths": { "type": "array", "items": { "type": "string" }, "description": "Absolute file paths to copy into the memento attachments directory." }
+      },
+      "required": ["id", "paths"]
+    }
+  },
+  {
+    "name": "get_memento_attachments",
+    "description": "Reads and returns all attachment files for a specific memento. Use this only when the extra detail is needed. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exact memento ID to inspect." }
+      },
+      "required": ["id"]
+    }
+  },
+  {
     "name": "delete_memento",
     "description": "Deletes an existing memento by its exact ID, regardless of whether it is global or repository-scoped. Requires init_memento or get_mementos first.",
     "inputSchema": {
