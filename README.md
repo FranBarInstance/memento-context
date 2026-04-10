@@ -14,6 +14,15 @@ A "memento" is a short, high-impact note—usually no more than a few lines—th
 
 By keeping memories small and scoped, they remain relevant and don't overwhelm the AI's reasoning capacity.
 
+## How it Works
+
+The interaction with Memento Context follows a simple, automated lifecycle:
+
+1.  **Session Bootstrap**: At the start of every chat, the assistant calls `init_memento`. This automatically loads all relevant global and repository-scoped notes into its active context, so it "remembers" you and your project immediately.
+2.  **Natural Learning**: As you talk, the assistant is trained to recognize important information—like a new coding preference or a project-specific rule—and will offer to save it (or save it automatically) using `save_memento`.
+3.  **Explicit Instructions**: You have full control. You can explicitly say *"Remember that I prefer using Vitest for testing"* or *"Save a note about our deployment workflow"*, and the assistant will persist that information for all future sessions.
+
+
 ## Features
 
 - Global Memory: Store preferences, rules, and facts about the user that persist across all interactions.
