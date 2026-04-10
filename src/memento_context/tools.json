@@ -1,0 +1,62 @@
+[
+  {
+    "name": "init_memento",
+    "description": "MANDATORY: Call this tool at the beginning of every session before responding to the user. Loads behavior instructions plus active global and repository mementos into context.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_mementos",
+    "description": "Returns active mementos. Use scope=all for both global and repository memory, or scope=global/repo to inspect just one area.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "description": "Which memory area to read: all, global, or repo."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "save_memento",
+    "description": "Saves a persistent memento across sessions. The AI must choose whether it belongs to global memory or the current repository. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Clear, concise memento content." },
+        "scope": { "type": "string", "description": "Storage scope: global or repo." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "2-4 keywords for contextual filtering." },
+        "expires": { "type": "string", "description": "Expiration date (YYYY-MM-DD) or 'never'. Defaults to 'never'." }
+      },
+      "required": ["text", "scope"]
+    }
+  },
+  {
+    "name": "delete_memento",
+    "description": "Deletes an existing memento by its exact ID, regardless of whether it is global or repository-scoped. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exact memento ID to delete." }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "move_memento",
+    "description": "Moves an existing memento from global to repository scope or from repository to global scope. Use when the user asks to reclassify stored memory. Requires init_memento or get_mementos first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exact memento ID to move." },
+        "target_scope": { "type": "string", "description": "Destination scope: global or repo." }
+      },
+      "required": ["id", "target_scope"]
+    }
+  }
+]

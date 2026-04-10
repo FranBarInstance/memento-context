@@ -1,0 +1,36 @@
+# See licence: https://github.com/FranBarInstance/memento-context
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memento-context"
+version = "0.1.0"
+description = "Memento Context MCP Server"
+readme = "README.md"
+authors = [{name = "FranBarInstance"}]
+license = {text = "MIT"}
+keywords = ["mcp", "memory", "ai", "context", "persistence"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+"Homepage" = "https://github.com/FranBarInstance/memento-context"
+"Bug Tracker" = "https://github.com/FranBarInstance/memento-context/issues"
+
+[project.scripts]
+memento-context = "memento_context.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+memento_context = ["*.json", "*.md"]
+
+[tool.pylint.MASTER]
+init-hook="import sys; sys.path.append('src')"
