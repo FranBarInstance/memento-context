@@ -1,7 +1,7 @@
 [
   {
     "name": "init_memento",
-    "description": "MANDATORY: Call this tool at the beginning of every session before responding to the user. Loads behavior instructions plus active global and repository mementos into context.",
+    "description": "MANDATORY: Call this ALWAYS as the FIRST action of EVERY session, NO EXCEPTIONS, before anything else, even for greetings or simple questions. Already loads all mementos, calling get_mementos right after is redundant.",
     "inputSchema": {
       "type": "object",
       "properties": {
