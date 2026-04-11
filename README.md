@@ -1,5 +1,9 @@
 # memento-context
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-orange.svg)](https://modelcontextprotocol.io/)
+
 Memento Context is a Model Context Protocol (MCP) server that provides persistent memory capabilities for AI assistants. It allows AI models to save, retrieve, and manage scoped context across different sessions and projects safely on your local machine.
 
 ## What is Memento Context?
@@ -13,6 +17,12 @@ A "memento" is a short, high-impact note—usually no more than a few lines—th
 *   **It IS NOT**: A heavy knowledge base designed for complex semantic search or RAG. Conversations can be saved as explicit attachments to a memento, but the core model remains direct, deterministic context injection rather than large-scale document retrieval.
 
 By keeping memories small and scoped, they remain relevant and don't overwhelm the AI's reasoning capacity.
+
+### The Zero-Dependency Advantage
+Unlike most MCP servers, `memento-context` is built using **Zero External Dependencies**. It uses only the Python standard library to implement the JSON-RPC protocol. This ensures:
+- **Instant Load Times**: No heavy package analysis at startup.
+- **Maximum Portability**: Runs anywhere Python is available without `pip install` headaches.
+- **High Security**: Zero risk of supply chain attacks from third-party libraries.
 
 ## How it Works
 
