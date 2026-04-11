@@ -404,7 +404,7 @@ class MementoServer:
         """Ensure session context was previously loaded in this session."""
         if not self.mementos_loaded:
             raise RuntimeError(
-                "Session constraint: call init_memento or get_mementos before mutating mementos."
+                "Memory not loaded. Call init_memento first, then retry."
             )
 
     # --- tool handlers ------------------------------------------------------
