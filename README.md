@@ -13,10 +13,29 @@ Memento Context is a Model Context Protocol (MCP) server that provides persisten
 ### The Concept
 A "memento" is a short, high-impact note—usually no more than a few lines—that captures preferences, rules, or specific project context. These notes are automatically injected into the AI's instructions at the start of every session.
 
-*   **It IS**: A place for "Always use TypeScript strict mode", "I prefer concise Spanish responses", or "This project uses FastAPI".
+*   **It IS**: A place for "Wait for the DB connection before calling the auth helper", "I prefer concise Spanish responses", or "Ignore the legacy/ folder during this migration".
 *   **It IS NOT**: A heavy knowledge base designed for complex semantic search or RAG. Conversations can be saved as explicit attachments to a memento, but the core model remains direct, deterministic context injection rather than large-scale document retrieval.
 
 By keeping memories small and scoped, they remain relevant and don't overwhelm the AI's reasoning capacity.
+
+### The Ecosystem of Memory: Where does Memento fit?
+
+To work effectively, Memento should coexist with other forms of documentation without overlapping. Think of it as the **"Scar Tissue"** of your project—the memory of past experiences that shapes future behavior.
+
+| Memory Type | Role | Content | Audience |
+|---|---|---|---|
+| **`README.md`** | **The Handbook** | Public overview, installation, and usage. | Humans & AI |
+| **`AGENTS.md`** | **The Constitution** | Permanent laws: coding standards, architecture, and persona. | AI Assistants |
+| **Memento** | **The Scar Tissue** | Dynamic lessons, ephemeral decisions, and personal preferences. | AI (Specific to You) |
+
+#### When to Memento?
+*   **Dynamic Learning:** "Yesterday we decided to pivot to Vitest because Jest was giving us timeout issues."
+*   **Contextual Scars:** "You've failed to handle the edge case in the parser 3 times; from now on, always check for null bytes first."
+*   **Ephemeral Focus:** "For this session, prioritize refactoring the `auth/` module over adding new features."
+
+#### When NOT to Memento?
+*   **Official Standards:** If it's a rule that everyone in the team should follow forever, it belongs in **`AGENTS.md`**.
+*   **Public Knowledge:** If a human needs to know how to install the project, it belongs in **`README.md`**.
 
 ### The Zero-Dependency Advantage
 Unlike most MCP servers, `memento-context` is built using **Zero External Dependencies**. It uses only the Python standard library to implement the JSON-RPC protocol. This ensures:
@@ -30,7 +49,7 @@ The interaction with Memento Context follows a simple, automated lifecycle:
 
 1.  **Session Bootstrap**: At the start of every chat, the assistant calls `init_memento`. This automatically loads all relevant global and repository-scoped notes into its active context, so it "remembers" you and your project immediately.
 2.  **Natural Learning**: As you talk, the assistant is trained to recognize important information—like a new coding preference or a project-specific rule—and will offer to save it using `save_memento`.
-3.  **Explicit Instructions**: You have full control. You can explicitly say *"Remember that I prefer using Vitest for testing"* or *"Save a note about our deployment workflow"*, and the assistant will persist that information for all future sessions.
+3.  **Explicit Instructions**: You have full control. You can explicitly say *"Remember that this specific module has a memory leak if we use the default constructor"* or *"Save a note about the workaround we found for the build issue"*, and the assistant will persist that information for all future sessions.
 4.  **Conversation Attachments**: On explicit request only, the assistant can save a full conversation or summary with `save_conversation`, and later attach related files with `save_memento_attachments`. These attachments are stored alongside the memento and can be retrieved with `get_memento_attachments` when the extra detail is needed.
 
 
