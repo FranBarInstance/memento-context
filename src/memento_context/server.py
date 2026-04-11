@@ -26,38 +26,15 @@ REPOS_DIR = MEMORY_HOME / "repos"
 VALID_SCOPES = {"global", "repo"}
 
 
-# pylint: disable=too-many-public-methods
-class MementoServer:
-    """Stateful MCP stdio server for memento storage and retrieval."""
+# ---------------------------------------------------------------------------
+# Storage layer — paths, serialisation, repo metadata
+# ---------------------------------------------------------------------------
 
-    def __init__(self) -> None:
-        self.mementos_loaded = False
-        self.active_repo_path: Optional[str] = None
-        self.handlers = {
-            "init_memento": self.handle_init_memento,
-            "get_mementos": self.handle_get_mementos,
-            "save_memento": self.handle_save_memento,
-            "save_conversation": self.handle_save_conversation,
-            "save_memento_attachments": self.handle_save_memento_attachments,
-            "get_memento_attachments": self.handle_get_memento_attachments,
-            "delete_memento": self.handle_delete_memento,
-            "move_memento": self.handle_move_memento,
-        }
+class MementoStorage:
+    """Handles all filesystem I/O for global and repository-scoped mementos."""
 
-    def load_tools(self) -> List[Dict[str, Any]]:
-        """Load tool definitions from tools.json file."""
-        if not TOOLS_FILE.exists():
-            raise FileNotFoundError(f"tools.json not found at {TOOLS_FILE}")
-        try:
-            return json.loads(TOOLS_FILE.read_text())
-        except json.JSONDecodeError as error:
-            raise ValueError(f"Invalid JSON in tools.json: {error}") from error
-
-    def load_behavior(self) -> str:
-        """Load AI behavior instructions for session bootstrap."""
-        if not BEHAVIOR_FILE.exists():
-            raise FileNotFoundError(f"behavior.md not found at {BEHAVIOR_FILE}")
-        return BEHAVIOR_FILE.read_text()
+    def __init__(self, active_repo_path: Optional[str] = None) -> None:
+        self.active_repo_path = active_repo_path
 
     def current_repo_path(self) -> str:
         """Return the canonical workspace path used as repository scope."""
@@ -155,123 +132,26 @@ class MementoServer:
         self.ensure_repo_metadata(resolved_path)
         self.save_json_file(self.repo_mementos_file(resolved_path), mementos)
 
-    def validate_scope(self, scope: Any) -> str:
-        """Validate global vs repository scope."""
-        if not isinstance(scope, str) or scope not in VALID_SCOPES:
-            raise ValueError("Invalid scope: expected 'global' or 'repo'")
-        return scope
+    def persist_mementos(
+        self,
+        scope: str,
+        mementos: List[Dict[str, Any]],
+        repo_path: Optional[str] = None,
+    ) -> None:
+        """Persist a full memento collection for the provided scope."""
+        if scope == "global":
+            self.save_global_mementos(mementos)
+        else:
+            self.save_repo_mementos(mementos, repo_path)
 
-    def is_active(self, memento: Dict[str, Any], today: str) -> bool:
-        """Return whether a memento should be injected into active context."""
-        expires = memento.get("expires")
-        if not expires or expires == "never":
-            return True
-        # Only treat as date if it looks like YYYY-MM-DD; otherwise treat as expired
-        not_a_date = (
-            not isinstance(expires, str)
-            or len(expires) != 10
-            or expires[4] != "-"
-            or expires[7] != "-"
-        )
-        if not_a_date:
-            return False
-        return expires >= today
-
-    def get_active_global_mementos(self) -> List[Dict[str, Any]]:
-        """Return non-expired global mementos."""
-        today = datetime.date.today().isoformat()
-        return [
-            memento for memento in self.load_global_mementos()
-            if self.is_active(memento, today)
-        ]
-
-    def get_active_repo_mementos(self, repo_path: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Return non-expired repo mementos."""
-        today = datetime.date.today().isoformat()
-        return [
-            memento for memento in self.load_repo_mementos(repo_path)
-            if self.is_active(memento, today)
-        ]
-
-    def format_memento_list(self, title: str, mementos: List[Dict[str, Any]]) -> str:
-        """Render a titled memento section for the model."""
-        if not mementos:
-            return f"## {title}\nNo active mementos."
-
-        lines = [
-            f"- [{memento.get('id', '?')}] "
-            f"{memento.get('text', '')} "
-            f"(expires: {memento.get('expires', 'never')})"
-            for memento in mementos
-        ]
-        return "\n".join([f"## {title}", *lines])
-
-    def format_active_context(self) -> str:
-        """Render both global and repository mementos for session bootstrap."""
-        repo_path = self.current_repo_path()
-        repo_name = Path(repo_path).name
-        return "\n\n".join(
-            [
-                self.format_memento_list(
-                    "Global Mementos",
-                    self.get_active_global_mementos(),
-                ),
-                self.format_memento_list(
-                    f"Repository Mementos ({repo_name})",
-                    self.get_active_repo_mementos(repo_path),
-                ),
-            ]
-        )
-
-    def mark_context_loaded(self, source: str) -> None:
-        """Mark session context as available and emit a debug log."""
-        self.mementos_loaded = True
-        print(f"[memento-context] {source} executed. Context loaded.", file=sys.stderr)
-
-    def require_mementos_loaded(self) -> None:
-        """Ensure session context was previously loaded in this session."""
-        if not self.mementos_loaded:
-            raise RuntimeError(
-                "Session constraint: call init_memento or get_mementos before mutating mementos."
-            )
-
-    def find_memento(self, memento_id: str) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
-        """Locate a memento in global or repository storage."""
-        global_mementos = self.load_global_mementos()
-        for memento in global_mementos:
-            if memento["id"] == memento_id:
-                return "global", global_mementos, memento
-
-        repo_mementos = self.load_repo_mementos()
-        for memento in repo_mementos:
-            if memento["id"] == memento_id:
-                return "repo", repo_mementos, memento
-
-        raise ValueError(f"Memento not found: {memento_id}")
-
-    def validate_expires(self, expires: Any) -> str:
-        """Validate and normalize the expires field."""
-        if expires is None or expires == "never":
-            return "never"
-        if not isinstance(expires, str):
-            raise ValueError("expires must be a string (YYYY-MM-DD) or 'never'")
-        try:
-            datetime.date.fromisoformat(expires)
-        except ValueError as error:
-            raise ValueError(
-                f"Invalid expires '{expires}':"
-                " expected 'never' or a date in YYYY-MM-DD format"
-            ) from error
-        return expires
-
-    def attachments_dir_name(self, memento_id: str) -> str:
-        """Return the standard folder name used for a memento attachments directory."""
-        return f"{memento_id}_attachments"
-
-    def get_attachments_dir(self, memento: Dict[str, Any], create: bool = False) -> Path:
+    def get_attachments_dir(
+        self,
+        memento: Dict[str, Any],
+        dir_name: str,
+        create: bool = False,
+    ) -> Path:
         """Resolve the attachment directory for a stored memento."""
-        scope = self.validate_scope(memento["scope"])
-        dir_name = memento.get("attachments") or self.attachments_dir_name(memento["id"])
+        scope = memento["scope"]
         if scope == "global":
             attachments_dir = GLOBAL_MEMENTOS_FILE.parent / dir_name
         else:
@@ -298,156 +178,11 @@ class MementoServer:
             created.append("summary.md")
         return created
 
-    def build_memento(self, args: Dict[str, Any], scope: str) -> Dict[str, Any]:
-        """Build a stored memento payload."""
-        memento = {
-            "id": f"memento_{datetime.date.today()}_{uuid.uuid4().hex[:8]}",
-            "scope": scope,
-            "text": args["text"],
-            "tags": args.get("tags", []),
-            "expires": self.validate_expires(args.get("expires")),
-            "created": datetime.date.today().isoformat(),
-        }
-        if scope == "repo":
-            repo_path = self.current_repo_path()
-            memento["repo_path"] = repo_path
-            memento["repo_name"] = Path(repo_path).name
-        if args.get("conversation") is not None or args.get("summary") is not None:
-            memento["attachments"] = self.attachments_dir_name(memento["id"])
-        return memento
-
-    def persist_memento(self, memento: Dict[str, Any]) -> None:
-        """Save a memento into the appropriate storage scope."""
-        scope = self.validate_scope(memento["scope"])
-        if scope == "global":
-            mementos = self.load_global_mementos()
-            mementos.append(memento)
-            self.save_global_mementos(mementos)
-            return
-
-        repo_path = str(memento["repo_path"])
-        mementos = self.load_repo_mementos(repo_path)
-        mementos.append(memento)
-        self.save_repo_mementos(mementos, repo_path)
-
-    def persist_updated_mementos(
-        self,
-        scope: str,
-        mementos: List[Dict[str, Any]],
-        repo_path: Optional[str] = None,
-    ) -> None:
-        """Persist a full memento collection for the provided scope."""
-        if scope == "global":
-            self.save_global_mementos(mementos)
-            return
-        self.save_repo_mementos(mementos, repo_path)
-
-    def remove_memento(self, memento_id: str) -> Tuple[str, Dict[str, Any]]:
-        """Delete a memento from its current store and return its original payload."""
-        scope, mementos, target = self.find_memento(memento_id)
-        filtered = [memento for memento in mementos if memento["id"] != memento_id]
-        if scope == "global":
-            self.save_global_mementos(filtered)
-        else:
-            # Use the repo_path stored in the memento itself to avoid CWD drift
-            repo_path = target.get("repo_path") or self.current_repo_path()
-            self.save_repo_mementos(filtered, repo_path)
-        return scope, target
-
-    def handle_init_memento(self, args: Dict[str, Any]) -> str:
-        """Handler for init_memento tool: returns behavior plus active mementos."""
-        repo_path = args.get("repo_path")
-        if repo_path:
-            self.active_repo_path = repo_path
-
-        behavior = self.load_behavior().strip()
-        active_context = self.format_active_context()
-        self.mark_context_loaded("init_memento")
-        return "\n\n".join(
-            [
-                "## Behavior",
-                behavior,
-                active_context,
-            ]
-        )
-
-    def handle_get_mementos(self, args: Dict[str, Any]) -> str:
-        """Handler for get_mementos tool: returns active mementos by scope."""
-        scope = args.get("scope", "all")
-        if scope not in {"all", "global", "repo"}:
-            raise ValueError("Invalid scope: expected 'all', 'global', or 'repo'")
-
-        sections: List[str] = []
-        if scope in {"all", "global"}:
-            sections.append(
-                self.format_memento_list(
-                    "Global Mementos",
-                    self.get_active_global_mementos(),
-                )
-            )
-        if scope in {"all", "repo"}:
-            repo_name = Path(self.current_repo_path()).name
-            sections.append(
-                self.format_memento_list(
-                    f"Repository Mementos ({repo_name})",
-                    self.get_active_repo_mementos(),
-                )
-            )
-
-        self.mark_context_loaded("get_mementos")
-        return "\n\n".join(sections)
-
-    def handle_save_memento(self, args: Dict[str, Any]) -> str:
-        """Handler for save_memento tool: stores a new scoped memento entry."""
-        self.require_mementos_loaded()
-        scope = self.validate_scope(args.get("scope"))
-        memento = self.build_memento(args, scope)
-        self.persist_memento(memento)
-        return f"Memento saved: {memento['id']} ({scope})"
-
-    def handle_save_conversation(self, args: Dict[str, Any]) -> str:
-        """Handler for save_conversation tool: stores a memento with attachments."""
-        self.require_mementos_loaded()
-        scope = self.validate_scope(args.get("scope"))
-        conversation = args.get("conversation")
-        summary = args.get("summary")
-        if conversation is None and summary is None:
-            raise ValueError(
-                "save_conversation requires at least one of 'conversation' or 'summary'"
-            )
-        if conversation is not None and not isinstance(conversation, str):
-            raise ValueError("conversation must be a string")
-        if summary is not None and not isinstance(summary, str):
-            raise ValueError("summary must be a string")
-
-        memento = self.build_memento(args, scope)
-        attachments_dir = self.get_attachments_dir(memento, create=True)
-        created = self.write_attachments(
-            attachments_dir,
-            conversation=conversation,
-            summary=summary,
-        )
-        self.persist_memento(memento)
-        return (
-            f"Conversation saved: {memento['id']} ({scope})"
-            f" — {len(created)} attachment(s) in {attachments_dir.name}/"
-        )
-
-    def handle_save_memento_attachments(self, args: Dict[str, Any]) -> str:
-        """Handler for save_memento_attachments tool: copies files into a memento."""
-        self.require_mementos_loaded()
-        paths = args.get("paths")
-        if not isinstance(paths, list) or not paths:
-            raise ValueError("paths must be a non-empty array of absolute file paths")
-
-        scope, mementos, memento = self.find_memento(args["id"])
-        if "attachments" not in memento:
-            memento["attachments"] = self.attachments_dir_name(memento["id"])
-            repo_path = memento.get("repo_path") if scope == "repo" else None
-            self.persist_updated_mementos(scope, mementos, repo_path)
-
-        attachments_dir = self.get_attachments_dir(memento, create=True)
-        results = [f"Attachments added to {memento['id']}:"]
+    def copy_files_to_attachments(
+        self, attachments_dir: Path, paths: List[str]
+    ) -> List[str]:
+        """Copy files into an attachments directory, returning result lines."""
+        results = []
         for raw_path in paths:
             if not isinstance(raw_path, str):
                 raise ValueError("each path must be a string")
@@ -460,25 +195,17 @@ class MementoServer:
             destination = attachments_dir / source.name
             shutil.copy2(source, destination)
             results.append(f"  ✓ {source.name} (copied from {source})")
-        return "\n".join(results)
+        return results
 
-    def handle_get_memento_attachments(self, args: Dict[str, Any]) -> str:
-        """Handler for get_memento_attachments tool: returns attachment contents."""
-        self.require_mementos_loaded()
-        _, _, memento = self.find_memento(args["id"])
-        if "attachments" not in memento:
-            raise ValueError(f"Memento has no attachments: {args['id']}")
-
-        attachments_dir = self.get_attachments_dir(memento)
+    def read_attachments(self, attachments_dir: Path, memento_id: str) -> str:
+        """Read all files in an attachments directory and return formatted text."""
         if not attachments_dir.exists() or not attachments_dir.is_dir():
-            raise ValueError(f"Attachments directory not found for memento: {args['id']}")
-
+            raise ValueError(f"Attachments directory not found for memento: {memento_id}")
         files = sorted(path for path in attachments_dir.iterdir() if path.is_file())
         if not files:
-            raise ValueError(f"No attachments found for memento: {args['id']}")
-
+            raise ValueError(f"No attachments found for memento: {memento_id}")
         sections = [
-            f"## Attachments for {memento['id']}",
+            f"## Attachments for {memento_id}",
             f"(folder: {attachments_dir.name}/)",
         ]
         for file_path in files:
@@ -486,25 +213,320 @@ class MementoServer:
             sections.append(file_path.read_text())
         return "\n".join(sections)
 
+
+# ---------------------------------------------------------------------------
+# Domain layer — business logic, validation, formatting
+# ---------------------------------------------------------------------------
+
+class MementoRepository:
+    """Manages memento lifecycle: build, validate, find, format and mutate."""
+
+    def __init__(self, storage: MementoStorage) -> None:
+        self.storage = storage
+
+    # --- validation ---------------------------------------------------------
+
+    def validate_scope(self, scope: Any) -> str:
+        """Validate global vs repository scope."""
+        if not isinstance(scope, str) or scope not in VALID_SCOPES:
+            raise ValueError("Invalid scope: expected 'global' or 'repo'")
+        return scope
+
+    def validate_expires(self, expires: Any) -> str:
+        """Validate and normalize the expires field."""
+        if expires is None or expires == "never":
+            return "never"
+        if not isinstance(expires, str):
+            raise ValueError("expires must be a string (YYYY-MM-DD) or 'never'")
+        try:
+            datetime.date.fromisoformat(expires)
+        except ValueError as error:
+            raise ValueError(
+                f"Invalid expires '{expires}':"
+                " expected 'never' or a date in YYYY-MM-DD format"
+            ) from error
+        return expires
+
+    # --- queries ------------------------------------------------------------
+
+    def is_active(self, memento: Dict[str, Any], today: str) -> bool:
+        """Return whether a memento should be injected into active context."""
+        expires = memento.get("expires")
+        if not expires or expires == "never":
+            return True
+        not_a_date = (
+            not isinstance(expires, str)
+            or len(expires) != 10
+            or expires[4] != "-"
+            or expires[7] != "-"
+        )
+        if not_a_date:
+            return False
+        return expires >= today
+
+    def get_active_global_mementos(self) -> List[Dict[str, Any]]:
+        """Return non-expired global mementos."""
+        today = datetime.date.today().isoformat()
+        return [m for m in self.storage.load_global_mementos() if self.is_active(m, today)]
+
+    def get_active_repo_mementos(self, repo_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return non-expired repo mementos."""
+        today = datetime.date.today().isoformat()
+        return [m for m in self.storage.load_repo_mementos(repo_path) if self.is_active(m, today)]
+
+    def find_memento(self, memento_id: str) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+        """Locate a memento in global or repository storage."""
+        global_mementos = self.storage.load_global_mementos()
+        for memento in global_mementos:
+            if memento["id"] == memento_id:
+                return "global", global_mementos, memento
+
+        repo_mementos = self.storage.load_repo_mementos()
+        for memento in repo_mementos:
+            if memento["id"] == memento_id:
+                return "repo", repo_mementos, memento
+
+        raise ValueError(f"Memento not found: {memento_id}")
+
+    # --- formatting ---------------------------------------------------------
+
+    def format_memento_list(self, title: str, mementos: List[Dict[str, Any]]) -> str:
+        """Render a titled memento section for the model."""
+        if not mementos:
+            return f"## {title}\nNo active mementos."
+        lines = [
+            f"- [{m.get('id', '?')}] {m.get('text', '')} (expires: {m.get('expires', 'never')})"
+            for m in mementos
+        ]
+        return "\n".join([f"## {title}", *lines])
+
+    def format_active_context(self) -> str:
+        """Render both global and repository mementos for session bootstrap."""
+        repo_path = self.storage.current_repo_path()
+        repo_name = Path(repo_path).name
+        return "\n\n".join([
+            self.format_memento_list("Global Mementos", self.get_active_global_mementos()),
+            self.format_memento_list(
+                f"Repository Mementos ({repo_name})",
+                self.get_active_repo_mementos(repo_path),
+            ),
+        ])
+
+    # --- mutations ----------------------------------------------------------
+
+    def attachments_dir_name(self, memento_id: str) -> str:
+        """Return the standard folder name used for a memento attachments directory."""
+        return f"{memento_id}_attachments"
+
+    def build_memento(self, args: Dict[str, Any], scope: str) -> Dict[str, Any]:
+        """Build a stored memento payload."""
+        memento: Dict[str, Any] = {
+            "id": f"memento_{datetime.date.today()}_{uuid.uuid4().hex[:8]}",
+            "scope": scope,
+            "text": args["text"],
+            "tags": args.get("tags", []),
+            "expires": self.validate_expires(args.get("expires")),
+            "created": datetime.date.today().isoformat(),
+        }
+        if scope == "repo":
+            repo_path = self.storage.current_repo_path()
+            memento["repo_path"] = repo_path
+            memento["repo_name"] = Path(repo_path).name
+        if args.get("conversation") is not None or args.get("summary") is not None:
+            memento["attachments"] = self.attachments_dir_name(memento["id"])
+        return memento
+
+    def persist_memento(self, memento: Dict[str, Any]) -> None:
+        """Save a memento into the appropriate storage scope."""
+        scope = self.validate_scope(memento["scope"])
+        if scope == "global":
+            mementos = self.storage.load_global_mementos()
+            mementos.append(memento)
+            self.storage.save_global_mementos(mementos)
+            return
+        repo_path = str(memento["repo_path"])
+        mementos = self.storage.load_repo_mementos(repo_path)
+        mementos.append(memento)
+        self.storage.save_repo_mementos(mementos, repo_path)
+
+    def remove_memento(self, memento_id: str) -> Tuple[str, Dict[str, Any]]:
+        """Delete a memento from its current store and return its original payload."""
+        scope, mementos, target = self.find_memento(memento_id)
+        filtered = [m for m in mementos if m["id"] != memento_id]
+        repo_path = target.get("repo_path") if scope == "repo" else None
+        self.storage.persist_mementos(scope, filtered, repo_path)
+        return scope, target
+
+
+# ---------------------------------------------------------------------------
+# Protocol layer — MCP stdio server, JSON-RPC dispatch, tool handlers
+# ---------------------------------------------------------------------------
+
+class MementoServer:
+    """Stateful MCP stdio server. Delegates logic to MementoRepository."""
+
+    def __init__(self) -> None:
+        self.mementos_loaded = False
+        self.storage = MementoStorage()
+        self.repo = MementoRepository(self.storage)
+        self.handlers = {
+            "init_memento": self.handle_init_memento,
+            "get_mementos": self.handle_get_mementos,
+            "save_memento": self.handle_save_memento,
+            "save_conversation": self.handle_save_conversation,
+            "save_memento_attachments": self.handle_save_memento_attachments,
+            "get_memento_attachments": self.handle_get_memento_attachments,
+            "delete_memento": self.handle_delete_memento,
+            "move_memento": self.handle_move_memento,
+        }
+
+    def load_tools(self) -> List[Dict[str, Any]]:
+        """Load tool definitions from tools.json file."""
+        if not TOOLS_FILE.exists():
+            raise FileNotFoundError(f"tools.json not found at {TOOLS_FILE}")
+        try:
+            return json.loads(TOOLS_FILE.read_text())
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Invalid JSON in tools.json: {error}") from error
+
+    def load_behavior(self) -> str:
+        """Load AI behavior instructions for session bootstrap."""
+        if not BEHAVIOR_FILE.exists():
+            raise FileNotFoundError(f"behavior.md not found at {BEHAVIOR_FILE}")
+        return BEHAVIOR_FILE.read_text()
+
+    def mark_context_loaded(self, source: str) -> None:
+        """Mark session context as available and emit a debug log."""
+        self.mementos_loaded = True
+        print(f"[memento-context] {source} executed. Context loaded.", file=sys.stderr)
+
+    def require_mementos_loaded(self) -> None:
+        """Ensure session context was previously loaded in this session."""
+        if not self.mementos_loaded:
+            raise RuntimeError(
+                "Session constraint: call init_memento or get_mementos before mutating mementos."
+            )
+
+    # --- tool handlers ------------------------------------------------------
+
+    def handle_init_memento(self, args: Dict[str, Any]) -> str:
+        """Handler for init_memento tool: returns behavior plus active mementos."""
+        repo_path = args.get("repo_path")
+        if repo_path:
+            self.storage.active_repo_path = repo_path
+
+        behavior = self.load_behavior().strip()
+        active_context = self.repo.format_active_context()
+        self.mark_context_loaded("init_memento")
+        return "\n\n".join(["## Behavior", behavior, active_context])
+
+    def handle_get_mementos(self, args: Dict[str, Any]) -> str:
+        """Handler for get_mementos tool: returns active mementos by scope."""
+        scope = args.get("scope", "all")
+        if scope not in {"all", "global", "repo"}:
+            raise ValueError("Invalid scope: expected 'all', 'global', or 'repo'")
+
+        sections: List[str] = []
+        if scope in {"all", "global"}:
+            sections.append(
+                self.repo.format_memento_list(
+                    "Global Mementos",
+                    self.repo.get_active_global_mementos(),
+                )
+            )
+        if scope in {"all", "repo"}:
+            repo_name = Path(self.storage.current_repo_path()).name
+            sections.append(
+                self.repo.format_memento_list(
+                    f"Repository Mementos ({repo_name})",
+                    self.repo.get_active_repo_mementos(),
+                )
+            )
+
+        self.mark_context_loaded("get_mementos")
+        return "\n\n".join(sections)
+
+    def handle_save_memento(self, args: Dict[str, Any]) -> str:
+        """Handler for save_memento tool: stores a new scoped memento entry."""
+        self.require_mementos_loaded()
+        scope = self.repo.validate_scope(args.get("scope"))
+        memento = self.repo.build_memento(args, scope)
+        self.repo.persist_memento(memento)
+        return f"Memento saved: {memento['id']} ({scope})"
+
+    def handle_save_conversation(self, args: Dict[str, Any]) -> str:
+        """Handler for save_conversation tool: stores a memento with attachments."""
+        self.require_mementos_loaded()
+        scope = self.repo.validate_scope(args.get("scope"))
+        conversation = args.get("conversation")
+        summary = args.get("summary")
+        if conversation is None and summary is None:
+            raise ValueError(
+                "save_conversation requires at least one of 'conversation' or 'summary'"
+            )
+        if conversation is not None and not isinstance(conversation, str):
+            raise ValueError("conversation must be a string")
+        if summary is not None and not isinstance(summary, str):
+            raise ValueError("summary must be a string")
+
+        memento = self.repo.build_memento(args, scope)
+        dir_name = self.repo.attachments_dir_name(memento["id"])
+        attachments_dir = self.storage.get_attachments_dir(memento, dir_name, create=True)
+        created = self.storage.write_attachments(
+            attachments_dir, conversation=conversation, summary=summary
+        )
+        self.repo.persist_memento(memento)
+        return (
+            f"Conversation saved: {memento['id']} ({scope})"
+            f" — {len(created)} attachment(s) in {attachments_dir.name}/"
+        )
+
+    def handle_save_memento_attachments(self, args: Dict[str, Any]) -> str:
+        """Handler for save_memento_attachments tool: copies files into a memento."""
+        self.require_mementos_loaded()
+        paths = args.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise ValueError("paths must be a non-empty array of absolute file paths")
+
+        scope, mementos, memento = self.repo.find_memento(args["id"])
+        if "attachments" not in memento:
+            memento["attachments"] = self.repo.attachments_dir_name(memento["id"])
+            repo_path = memento.get("repo_path") if scope == "repo" else None
+            self.storage.persist_mementos(scope, mementos, repo_path)
+
+        dir_name = memento["attachments"]
+        attachments_dir = self.storage.get_attachments_dir(memento, dir_name, create=True)
+        results = [f"Attachments added to {memento['id']}:"]
+        results += self.storage.copy_files_to_attachments(attachments_dir, paths)
+        return "\n".join(results)
+
+    def handle_get_memento_attachments(self, args: Dict[str, Any]) -> str:
+        """Handler for get_memento_attachments tool: returns attachment contents."""
+        self.require_mementos_loaded()
+        _, _, memento = self.repo.find_memento(args["id"])
+        if "attachments" not in memento:
+            raise ValueError(f"Memento has no attachments: {args['id']}")
+
+        dir_name = memento["attachments"]
+        attachments_dir = self.storage.get_attachments_dir(memento, dir_name)
+        return self.storage.read_attachments(attachments_dir, args["id"])
+
     def handle_delete_memento(self, args: Dict[str, Any]) -> str:
         """Handler for delete_memento tool: removes a memento by given id."""
         self.require_mementos_loaded()
-        original_scope, _ = self.remove_memento(args["id"])
+        original_scope, _ = self.repo.remove_memento(args["id"])
         return f"Memento deleted: {args['id']} ({original_scope})"
 
     def handle_move_memento(self, args: Dict[str, Any]) -> str:
         """Handler for move_memento tool: changes a memento scope."""
         self.require_mementos_loaded()
-        target_scope = self.validate_scope(args.get("target_scope"))
-
-        # Single lookup: reuse the full payload returned by find_memento
-        original_scope, _, memento = self.find_memento(args["id"])
+        target_scope = self.repo.validate_scope(args.get("target_scope"))
+        original_scope, _, memento = self.repo.find_memento(args["id"])
 
         if original_scope == target_scope:
             return f"Memento unchanged: {args['id']} already in {target_scope}"
 
-        # Remove from current store using stored repo_path to avoid CWD drift
-        _, _ = self.remove_memento(args["id"])
+        self.repo.remove_memento(args["id"])
 
         moved = dict(memento)
         moved["scope"] = target_scope
@@ -512,12 +534,14 @@ class MementoServer:
             moved.pop("repo_path", None)
             moved.pop("repo_name", None)
         else:
-            repo_path = self.current_repo_path()
+            repo_path = self.storage.current_repo_path()
             moved["repo_path"] = repo_path
             moved["repo_name"] = Path(repo_path).name
 
-        self.persist_memento(moved)
+        self.repo.persist_memento(moved)
         return f"Memento moved: {args['id']} ({original_scope} -> {target_scope})"
+
+    # --- MCP protocol -------------------------------------------------------
 
     def respond(self, obj: Dict[str, Any]) -> None:
         """Send JSON response over stdout following MCP protocol."""
@@ -527,41 +551,31 @@ class MementoServer:
     def handle_initialize(self, req_id: Optional[str]) -> None:
         """Handle MCP initialize request."""
         self.mementos_loaded = False
-        self.respond(
-            {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "memento-context", "version": "0.1.0"},
-                },
-            }
-        )
+        self.respond({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "memento-context", "version": "0.1.0"},
+            },
+        })
 
     def handle_tools_list(self, req_id: Optional[str]) -> None:
         """Handle MCP tools/list request."""
         try:
             tools = self.load_tools()
-            self.respond(
-                {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {"tools": tools},
-                }
-            )
+            self.respond({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"tools": tools},
+            })
         except Exception as error:  # pylint: disable=broad-exception-caught
-            error_msg = f"{type(error).__name__}: {error}"
-            self.respond(
-                {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {
-                        "code": -32000,
-                        "message": error_msg,
-                    },
-                }
-            )
+            self.respond({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": f"{type(error).__name__}: {error}"},
+            })
 
     def handle_tools_call(self, req: Dict[str, Any], req_id: Optional[str]) -> None:
         """Handle MCP tools/call request."""
@@ -576,50 +590,33 @@ class MementoServer:
 
             args = params.get("arguments", {})
             if not isinstance(args, dict):
-                raise ValueError(
-                    "Invalid tools/call request: arguments must be an object"
-                )
+                raise ValueError("Invalid tools/call request: arguments must be an object")
 
             if tool not in self.handlers:
                 raise ValueError(f"Unimplemented tool: {tool}")
+
             result = self.handlers[tool](args)
-            self.respond(
-                {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": [{"type": "text", "text": result}],
-                    },
-                }
-            )
+            self.respond({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": result}]},
+            })
         except Exception as error:  # pylint: disable=broad-exception-caught
-            error_msg = f"{type(error).__name__}: {error}"
-            self.respond(
-                {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {
-                        "code": -32000,
-                        "message": error_msg,
-                    },
-                }
-            )
+            self.respond({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": f"{type(error).__name__}: {error}"},
+            })
 
     def handle_unknown_method(self, method: Optional[str], req_id: Optional[str]) -> None:
         """Return JSON-RPC -32601 Method Not Found for unrecognised MCP methods."""
-        # Suppress notification messages (id is None) — they don't expect a response
         if req_id is None:
             return
-        self.respond(
-            {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32601,
-                    "message": f"Method not found: {method}",
-                },
-            }
-        )
+        self.respond({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32601, "message": f"Method not found: {method}"},
+        })
 
     def run(self) -> None:
         """Main stdio server loop for MCP protocol."""
@@ -627,7 +624,6 @@ class MementoServer:
             line = line.strip()
             if not line:
                 continue
-
             try:
                 req = json.loads(line)
             except json.JSONDecodeError:
