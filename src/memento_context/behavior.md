@@ -1,73 +1,75 @@
-# Memento-Context — Assistant Behavior Guidelines
+# Memento-Context — Behavior Guidelines
 
-## Initialization Rule (MANDATORY)
-At the start of EVERY conversation, call `init_memento` before generating your first response.
-Incorporate the returned behavior instructions plus active global and repository mementos into your internal context and adapt tone, format, and content accordingly.
-Never respond to the user without loading memory first.
+## Initialization (MANDATORY)
+Call `init_memento` at the start of every conversation, before responding. Never respond without loading memory first.
 
-## When & How to Use `save_memento`
-**Explicit Triggers:** "remember that...", "it's important that...", "always do...", "keep in mind that...", "save this..."
-**Implicit Triggers:** Recurring preferences, project context, style rules, dated reminders.
-**Repetition / Frustration Cues:** "I told you this a thousand times", "you always forget this", "I already told you this", "again with the same thing".
+## `save_memento` — When and how
+
+**Explicit triggers:** "remember that…", "it's important that…", "always do…", "keep in mind that…", "save this…"
+**Implicit triggers:** recurring preferences, project context, style rules, dated reminders.
+**Frustration cues** ("I told you this a thousand times", "you always forget"): treat as implicit trigger.
+
 **Format:**
 - `text`: 1-2 lines, clear and actionable.
-- `scope`: `global` for user-wide preferences and facts, `repo` for information specific to the current repository.
+- `scope`: `global` (user-wide) or `repo` (current repository).
 - `tags`: 2-4 relevant keywords.
-- `expires`: Specific date or "never". If user says "tomorrow", resolve to actual date.
-**Confirmation:** For implicit triggers, ask briefly: *"Should I save this for future sessions?"* For explicit triggers, save directly.
-**Interpretation of Frustration Cues:** Treat repeated-frustration phrasing as a strong signal that the information may need persistent memory, but do not save automatically unless the user is also making an explicit request. Ask briefly whether it should be saved for future sessions.
+- `expires`: specific date or "never". If user says "tomorrow", resolve to the actual date.
 
-## When to Use `save_conversation`
-**Only on explicit request:** "Remember this conversation", "Save this chat", "I want to remember this session", "Save a summary of what we discussed".
+**Confirmation:** implicit trigger → ask first. Explicit trigger → save directly.
+
+## `save_conversation` — Only on explicit request
+
+Triggers: "remember this conversation", "save this chat", "I want to remember this session".
 **Never save conversations automatically.**
-- `text`: Brief 1-3 line description that acts as an index entry. Include `[Conversación guardada]` to distinguish it from simple mementos.
-- `text` must be descriptive enough to identify the session later without opening attachments. It should mention the concrete topic, decision, problem, feature, bug, or file area discussed.
-- Avoid vague labels such as `[Conversación guardada] Resumen de la sesión` or `[Conversación guardada] Charla del proyecto`.
-- Prefer patterns like:
-  `[Conversación guardada] Plan para adjuntos en mementos`
-  `[Conversación guardada] Decisión sobre scope global vs repo`
-  `[Conversación guardada] Debug de save_conversation en memento-context`
-- `conversation`: Full relevant conversation content.
-- `summary`: Summary when the user asks for it or when the conversation is long.
-- `scope`: `repo` for project-specific conversations, `global` for personal preferences or general knowledge.
-- Default to `repo` whenever the conversation is about the current codebase, files, architecture, bugs, features, plans, or workflows of the active repository.
-- Use `global` only when the saved conversation is clearly not tied to the current repository and should remain relevant across projects.
-- If the conversation happened while working in a repository and the scope is ambiguous, prefer `repo`, not `global`.
 
-## When to Use `save_memento_attachments`
-**Only on explicit request:** "save this file too", "attach this file", "add the plan to the memento".
-- `id`: The destination memento. The AI may resolve the ID from the conversation context.
-- `paths`: Absolute paths to files to copy. Infer them from the current context when reliable.
-- Do not use this for generated conversation transcripts; those belong in `save_conversation`.
+- `text`: 1-3 descriptive lines. Include `[Saved conversation]` + concrete topic (decision, bug, feature, file). Avoid vague labels.
+  - ✓ `[Saved conversation] Decision on global vs repo scope`
+  - ✗ `[Saved conversation] Session summary`
+- `scope`: default to `repo` if the conversation touches the current codebase. Use `global` only if clearly unrelated to the current repository. When ambiguous inside a repo, prefer `repo`.
+- `conversation`: full relevant text.
+- `summary`: add only if explicitly requested.
 
-## When to Use `get_memento_attachments`
-- When `get_mementos` returns a memento marked with `[Conversación guardada]` and the current task needs the full detail.
-- Never load attachments preemptively; only fetch them when needed to answer.
+## `save_memento_attachments` — Only on explicit request
 
-## Choosing `scope`
-- Use `global` for preferences or facts that should follow the user everywhere.
-- Use `repo` for stack choices, coding rules, architecture, workflows, and context tied to the current repository.
-- If the user explicitly says "for all projects" or similar, use `global`.
-- If the user explicitly says "only in this repo/project", use `repo`.
-- If the scope is ambiguous and the distinction matters, ask briefly before saving.
+Triggers: "attach this file", "add the plan to the memento".
+- `id`: destination memento.
+- `paths`: absolute file paths.
+- Do not use for conversation transcripts — those belong in `save_conversation`.
 
-## When to Use `delete_memento`
-- User says: "forget...", "no longer applies...", "delete the memento about X".
-- A memento expires and user confirms completion.
-- Never delete without confirmation unless the ID is explicitly provided.
+## `get_memento_attachments` — Only when needed
 
-## When to Use `move_memento`
-- User says a stored memory should apply globally instead of only to this repo.
-- User says a stored memory should be limited to this repo instead of all repos.
-- Use `move_memento` instead of delete-and-save when the same memory should be reclassified.
+Use when `get_mementos` returns a memento marked `[Saved conversation]` and the current task requires full detail. Never load attachments preemptively.
 
-## Context & Tone Guidelines
-- Mementos are NOT listed mechanically unless the user asks "what do you remember?".
-- If a memento expires today, mention it only if contextually relevant.
-- Respect constraints and preferences silently.
-- **Transparency:** If asked how memory works: *"I store global mementos for all projects and repository mementos for just this repo. You can ask me to remember, forget, move, or show what I have."*
-- **Privacy:** Never expose file paths, internal IDs, or JSON structures to the user.
-- **Implicit Limit:** Prioritize recent and high-relevance mementos. If >7 are active, filter by context.
+## `delete_memento`
 
-## Technical Constraint
-The server blocks `save_memento`, `save_conversation`, `save_memento_attachments`, `get_memento_attachments`, `delete_memento`, and `move_memento` if `init_memento` or `get_mementos` hasn't been called in the current session. Always follow: `init_memento` → respond → mutation tools (if applicable).
+Triggers: "forget…", "no longer applies…", "delete the memento about X".
+Always confirm before deleting, unless the ID is explicitly provided.
+
+## `move_memento`
+
+Use when a memento should be reclassified between `repo` and `global`. Preserves the original ID and history; prefer over delete-and-save.
+
+## Scope reference
+
+| Situation | Scope |
+|---|---|
+| Preferences or facts valid across all projects | `global` |
+| Stack, coding rules, architecture, repo-specific context | `repo` |
+| User says "for all projects" | `global` |
+| User says "only in this repo" | `repo` |
+| Ambiguous, inside a repository | `repo` (default) |
+| Ambiguous and distinction matters | Ask briefly |
+
+## General behavior
+
+- Don't list mementos mechanically — only if the user asks "what do you remember?".
+- Apply preferences silently.
+- If mementos conflict, the most recent takes precedence.
+- Never expose implementation details (internal IDs, storage paths, raw data structures) to the user.
+- If asked how memory works: *"I store global mementos for all projects and repository mementos for just this repo. You can ask me to remember, forget, move, or show what I have."*
+
+## Technical constraint
+
+`save_memento`, `save_conversation`, `save_memento_attachments`, `get_memento_attachments`, `delete_memento`, and `move_memento` require `init_memento` or `get_mementos` to have been called first in the current session.
+
+Required order: **`init_memento` → respond → mutation tools** (if applicable).
