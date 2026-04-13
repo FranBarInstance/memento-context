@@ -300,14 +300,20 @@ class MementoRepository:
         ]
         return "\n".join([f"## {title}", *lines])
 
+    def repository_scope_title(self, repo_path: Optional[str] = None) -> str:
+        """Build an unambiguous title for repository-scoped memory sections."""
+        resolved_path = str(Path(repo_path or self.storage.current_repo_path()).resolve())
+        repo_name = Path(resolved_path).name or "repo"
+        repo_key = self.storage.repo_key(resolved_path)
+        return f"Repository Mementos ({repo_name} | key: {repo_key} | path: {resolved_path})"
+
     def format_active_context(self) -> str:
         """Render both global and repository mementos for session bootstrap."""
         repo_path = self.storage.current_repo_path()
-        repo_name = Path(repo_path).name
         return "\n\n".join([
             self.format_memento_list("Global Mementos", self.get_active_global_mementos()),
             self.format_memento_list(
-                f"Repository Mementos ({repo_name})",
+                self.repository_scope_title(repo_path),
                 self.get_active_repo_mementos(repo_path),
             ),
         ])
@@ -435,11 +441,11 @@ class MementoServer:
                 )
             )
         if scope in {"all", "repo"}:
-            repo_name = Path(self.storage.current_repo_path()).name
+            repo_path = self.storage.current_repo_path()
             sections.append(
                 self.repo.format_memento_list(
-                    f"Repository Mementos ({repo_name})",
-                    self.repo.get_active_repo_mementos(),
+                    self.repo.repository_scope_title(repo_path),
+                    self.repo.get_active_repo_mementos(repo_path),
                 )
             )
 

@@ -65,7 +65,7 @@ def test_init_memento_with_custom_path(mock_server, tmp_path):
 def test_mutation_restriction(mock_server):
     """Ensure mutations are blocked if context hasn't been loaded."""
     mock_server.mementos_loaded = False
-    with pytest.raises(RuntimeError, match="Session constraint"):
+    with pytest.raises(RuntimeError, match="Memory not loaded"):
         mock_server.handle_save_memento({"text": "fail", "scope": "global"})
 
 
