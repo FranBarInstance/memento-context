@@ -548,9 +548,19 @@ class MementoServer:
         sys.stdout.write(json.dumps(obj) + "\n")
         sys.stdout.flush()
 
-    def handle_initialize(self, req_id: Optional[str]) -> None:
+    def respond_error(self, req_id: Any, code: int, message: str) -> None:
+        """Send a JSON-RPC error response."""
+        self.respond({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": code, "message": message},
+        })
+
+    def handle_initialize(self, req_id: Any) -> None:
         """Handle MCP initialize request."""
         self.mementos_loaded = False
+        if req_id is None:
+            return
         self.respond({
             "jsonrpc": "2.0",
             "id": req_id,
@@ -561,8 +571,10 @@ class MementoServer:
             },
         })
 
-    def handle_tools_list(self, req_id: Optional[str]) -> None:
+    def handle_tools_list(self, req_id: Any) -> None:
         """Handle MCP tools/list request."""
+        if req_id is None:
+            return
         try:
             tools = self.load_tools()
             self.respond({
@@ -571,52 +583,60 @@ class MementoServer:
                 "result": {"tools": tools},
             })
         except Exception as error:  # pylint: disable=broad-exception-caught
-            self.respond({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32000, "message": f"{type(error).__name__}: {error}"},
-            })
+            self.respond_error(req_id, -32000, f"{type(error).__name__}: {error}")
 
-    def handle_tools_call(self, req: Dict[str, Any], req_id: Optional[str]) -> None:
+    def handle_tools_call(self, req: Dict[str, Any], req_id: Any) -> None:
         """Handle MCP tools/call request."""
+        params = req.get("params")
+        if not isinstance(params, dict):
+            self.respond_error(req_id, -32602, "Invalid params: missing params object")
+            return
+
+        tool = params.get("name")
+        if not isinstance(tool, str) or not tool:
+            self.respond_error(req_id, -32602, "Invalid params: missing tool name")
+            return
+
+        args = params.get("arguments", {})
+        if not isinstance(args, dict):
+            self.respond_error(req_id, -32602, "Invalid params: arguments must be an object")
+            return
+
+        if tool not in self.handlers:
+            self.respond_error(req_id, -32601, f"Method not found: tool '{tool}'")
+            return
+
         try:
-            params = req.get("params")
-            if not isinstance(params, dict):
-                raise ValueError("Invalid tools/call request: missing params object")
-
-            tool = params.get("name")
-            if not isinstance(tool, str) or not tool:
-                raise ValueError("Invalid tools/call request: missing tool name")
-
-            args = params.get("arguments", {})
-            if not isinstance(args, dict):
-                raise ValueError("Invalid tools/call request: arguments must be an object")
-
-            if tool not in self.handlers:
-                raise ValueError(f"Unimplemented tool: {tool}")
-
             result = self.handlers[tool](args)
+            if req_id is None:
+                return
             self.respond({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": result}]},
+                "result": {
+                    "content": [{"type": "text", "text": result}],
+                    "isError": False,
+                },
             })
         except Exception as error:  # pylint: disable=broad-exception-caught
+            if req_id is None:
+                return
             self.respond({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {"code": -32000, "message": f"{type(error).__name__}: {error}"},
+                "result": {
+                    "content": [
+                        {"type": "text", "text": f"{type(error).__name__}: {error}"}
+                    ],
+                    "isError": True,
+                },
             })
 
-    def handle_unknown_method(self, method: Optional[str], req_id: Optional[str]) -> None:
+    def handle_unknown_method(self, method: Optional[str], req_id: Any) -> None:
         """Return JSON-RPC -32601 Method Not Found for unrecognised MCP methods."""
         if req_id is None:
             return
-        self.respond({
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"},
-        })
+        self.respond_error(req_id, -32601, f"Method not found: {method}")
 
     def run(self) -> None:
         """Main stdio server loop for MCP protocol."""
@@ -627,10 +647,15 @@ class MementoServer:
             try:
                 req = json.loads(line)
             except json.JSONDecodeError:
+                self.respond_error(None, -32700, "Parse error")
+                continue
+
+            if not isinstance(req, dict):
+                self.respond_error(None, -32600, "Invalid Request")
                 continue
 
             method: Optional[str] = req.get("method")
-            req_id: Optional[str] = req.get("id")
+            req_id: Any = req.get("id")
 
             if method == "initialize":
                 self.handle_initialize(req_id)
